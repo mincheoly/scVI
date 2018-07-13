@@ -84,6 +84,7 @@ def de_cortex(px_scale, all_labels, gene_names, M_permutation=100000, permutatio
     print('\n'.join([gene_name + " : " + str(r) for (gene_name, r) in result]))
     return res
 
+
 @no_grad()
 @eval_modules()
 def most_expressed_genes(vae, data_loader, M_sampling=100, M_permutation=100000, permutation=False):
