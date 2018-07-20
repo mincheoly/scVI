@@ -1,8 +1,7 @@
-import pandas as pd
 import numpy as np
-from numpy import loadtxt 
+from numpy import loadtxt
 from scipy.io import mmread
-import tables 
+import tables
 import scipy.sparse as sparse
 
 
