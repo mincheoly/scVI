@@ -7,11 +7,25 @@ Welcome to scVI's documentation!
 
    readme
    installation
-   usage
-   modules
    contributing
    authors
    history
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Usage:
+
+   examples/scVI-data-loading.ipynb
+   examples/scVI-dev.ipynb
+   examples/scVI-semi-supervised.ipynb
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Package Reference
+
+   dataset
+   inference
+   models
 
 Indices and tables
 ==================
