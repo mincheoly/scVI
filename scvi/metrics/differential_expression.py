@@ -75,3 +75,86 @@ def de_cortex(px_scale, all_labels, gene_names, M_permutation=100000, permutatio
     result = [(gene_name, res[np.where(gene_names == gene_name)[0]][0]) for gene_name in genes_of_interest]
     print('\n'.join([gene_name + " : " + str(r) for (gene_name, r) in result]))
     return result[1][1]  # if we had to give a metric to optimize
+
+
+def de_raw(data_loader, M_sampling=100):
+    r"""
+    :param data_loader: a ``data_loader`` object
+    :param M_sampling: number of samples
+    :param M_permutation: M_permutation: 10000 - default value in Romain's code
+    :param permutation:
+    :return: a table of top 10 most expressed gene for each cell. Entry[i][j] represents the cell j's gene_expression
+    level for gene i. Gene i is the most expressed gene for cell i.
+    """
+    gene_names = data_loader.dataset.gene_names
+
+    px_scale, all_labels = data_loader.dataset.X, data_loader.dataset.labels
+
+
+def de_scvi(vae, data_loader, M_sampling=100):
+    r"""
+    :param vae: a VAE model object
+    :param data_loader: a ``data_loader`` object
+    :param M_sampling: number of samples
+    :return: a table of top 10 most expressed gene for each cell. Entry[i][j] represents the cell j's gene_expression
+    level for gene i. Gene i is the most expressed gene for cell i.
+    """
+    gene_names = data_loader.dataset.gene_names
+    px_scale, all_labels = de_stats(vae, data_loader, M_sampling)
+
+    genes = []
+    results = []
+
+    n_cells = vae.n_labels
+    for cell_idx in range(n_cells):
+        res = differential_expression(px_scale, all_labels, cell_idx)
+        results.append(res)
+        top10_indices = np.argsort(res)[::-1][:10]
+        top10_genes = gene_names[top10_indices]
+        genes += list(top10_genes)
+
+    results = [[res[np.where(gene_names == gene_name)[0]][0] for gene_name in genes] for res in results]
+    genes = np.array(genes)
+    results = np.array(results).T # change to genes * clusters
+    return genes, results
+
+
+def differential_expression(px_scale, all_labels, cell_idx, other_cell_idx=None, M_permutation=100000, permutation=False):
+    r"""
+    :param px_scale:
+    :param all_labels:
+    :param cell_idx:
+    :param other_cell_idx:
+    :param M_permutation: 10000 - default value in Romain's code
+    :param permutation:
+    :return:
+    """
+    # Here instead of A, B = 200, 400: we do on whole dataset then select cells
+    sample_rate_a = (px_scale[all_labels.view(-1) == cell_idx].view(-1, px_scale.size(1))
+                     .cpu().detach().numpy())
+    sample_rate_b = (px_scale[all_labels.view(-1) != cell_idx].view(-1, px_scale.size(1))
+                     .cpu().detach().numpy()) if other_cell_idx is None \
+        else (px_scale[all_labels.view(-1) == other_cell_idx].view(-1, px_scale.size(1))
+              .cpu().detach().numpy())
+
+    # agregate dataset
+    samples = np.vstack((sample_rate_a, sample_rate_b))
+
+    # prepare the pairs for sampling
+    list_1 = list(np.arange(sample_rate_a.shape[0]))
+    list_2 = list(sample_rate_a.shape[0] + np.arange(sample_rate_b.shape[0]))
+    if not permutation:
+        # case1: no permutation, sample from A and then from B
+        u, v = np.random.choice(list_1, size=M_permutation), np.random.choice(list_2, size=M_permutation)
+    else:
+        # case2: permutation, sample from A+B twice
+        u, v = (np.random.choice(list_1 + list_2, size=M_permutation),
+                np.random.choice(list_1 + list_2, size=M_permutation))
+
+    # then constitutes the pairs
+    first_set = samples[u]
+    second_set = samples[v]
+
+    res = np.mean(first_set >= second_set, 0)
+    res = np.log(res + 1e-8) - np.log(1 - res + 1e-8)
+    return res
