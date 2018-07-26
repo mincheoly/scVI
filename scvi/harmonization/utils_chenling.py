@@ -45,7 +45,6 @@ def get_matrix_from_h5(filename, genome):
         except tables.NoSuchNodeError:
             print("That genome does not exist in this file.")
             return None
-        gene_ids = getattr(group, 'genes').read()
         gene_names = getattr(group, 'gene_names').read()
         barcodes = getattr(group, 'barcodes').read()
         data = getattr(group, 'data').read()
@@ -55,7 +54,7 @@ def get_matrix_from_h5(filename, genome):
         matrix = sparse.csc_matrix((data, indices, indptr), shape=shape)
         gene_names = gene_names.astype('<U18')
         barcodes = barcodes.astype('<U18')
-        return gene_ids, gene_names, barcodes, matrix
+        return gene_names, barcodes, matrix
 
 
 def TryFindCells(dict, cellid, count):

@@ -1,22 +1,29 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sklearn.cluster import KMeans
+from sklearn.mixture import GaussianMixture as GMM
 from sklearn.manifold import TSNE
+from sklearn.metrics import adjusted_rand_score as ARI
+from sklearn.metrics import normalized_mutual_info_score as NMI
+from sklearn.metrics import silhouette_score
 from torch.nn import functional as F
 
 from scvi.dataset import CortexDataset
 from scvi.dataset.data_loaders import DataLoaders
 from scvi.dataset.data_loaders import TrainTestDataLoaders, AlternateSemiSupervisedDataLoaders, \
     JointSemiSupervisedDataLoaders
-from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing
+from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf, \
+    unsupervised_classification_accuracy, compute_predictions
+from scvi.metrics.classification import unsupervised_clustering_accuracy
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
 from . import Inference, ClassifierInference
 
-plt.switch_backend('agg')
 
+plt.switch_backend('agg')
 
 class VariationalInference(Inference):
     default_metrics_to_monitor = ['ll']
@@ -111,6 +118,29 @@ class SemiSupervisedVariationalInference(VariationalInference):
         return acc
 
     accuracy.mode = 'max'
+
+    def hierarchical_accuracy(self, name, verbose=False):
+
+        all_y, all_y_pred = compute_predictions(self.model, self.data_loaders[name])
+        acc = np.mean(all_y == all_y_pred)  # other metrics ? (cross entropy, ect...)
+
+        all_y_groups = np.array([self.model.labels_groups[y] for y in all_y])
+        all_y_pred_groups = np.array([self.model.labels_groups[y] for y in all_y_pred])
+        h_acc = np.mean(all_y_groups == all_y_pred_groups)  # other metrics ? (cross entropy, ect...)
+
+        if verbose:
+            print("Acc for %s is : %.4f\nH-Acc for %s is : %.4f\n" % (name, acc, name, h_acc))
+        return acc
+
+    accuracy.mode = 'max'
+
+    def unsupervised_accuracy(self, name, verbose=False):
+        uca = unsupervised_classification_accuracy(self.model, self.data_loaders[name])[0]
+        if verbose:
+            print("UCA for %s is : %.4f" % (name, uca))
+        return uca
+
+    unsupervised_accuracy.mode = 'max'
 
     def svc_rf(self, **kwargs):
         if 'train' in self.data_loaders:

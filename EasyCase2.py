@@ -1,50 +1,67 @@
-from scvi.dataset.BICCN import MacoskoDataset,RegevDataset
-from scvi.dataset.dataset import GeneExpressionDataset
 from scvi.models.vae import VAE
+from scvi.models.svaec import SVAEC
 from scvi.inference import VariationalInference
+from scvi.inference import JointSemiSupervisedVariationalInference
 use_cuda = True
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
 from scvi.metrics.clustering import get_latent
+from scvi.metrics.classification import compute_accuracy
 from scvi.harmonization.benchmark import sample_by_batch, knn_purity_avg
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import seaborn as sns
-plotname = 'easycase2'
 from scvi.metrics.clustering import entropy_batch_mixing
+from scvi.dataset.BICCN import combine_MacoskoRegev
+# import sys
+# load_model = bool(sys.argv[1])
+# model_type = str(sys.argv[2])
+load_model = False
+model_type = 'svaec'
+plotname = 'easycase2'
 
-dataset1 = MacoskoDataset()
-dataset2 = RegevDataset()
 
-temp1=[]
-for key in label_map2.keys():
-    temp1.append(label_map2[key].split('_')[0])
 
-temp2=[]
-for key in label_map1.keys():
-    temp2.append(label_map1[key].split('_')[0])
+# np.savetxt("../Macosko_Regev.genenames.txt", gene_dataset.gene_names,fmt="%s")
+# np.savetxt("../Macosko_Regev.label.txt", gene_dataset.labels, fmt="%s")
+# np.save("../Macosko_Regev.batch.npy", np.concatenate(gene_dataset.batch_indices))
+# mmwrite("../Macosko_Regev.count.npy", gene_dataset.X)
 
-gene_dataset = GeneExpressionDataset.concat_datasets(dataset1, dataset2)
-gene_dataset.subsample_genes(5000)
+gene_dataset,group_labels,group_names = combine_MacoskoRegev()
 
-load_model = True
+if model_type is 'vae':
+    if load_model is True:
+        vae = torch.load('../easycase2.pt')
+        data_loader = DataLoader(gene_dataset, batch_size=128, pin_memory=use_cuda, shuffle=False,
+                                 collate_fn=gene_dataset.collate_fn)
+    else:
+        vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches, n_labels=gene_dataset.n_labels,
+                  n_hidden=128, n_latent=10, n_layers=1, dispersion='gene')
+        infer_vae = VariationalInference(vae, gene_dataset, use_cuda=use_cuda)
+        infer_vae.fit(n_epochs=250)
+        torch.save(infer_vae.model, '../easycase2.pt')
+        data_loader = infer_vae.data_loaders['sequential']
+    latent, batch_indices, labels = get_latent(vae, data_loader)
+    keys = gene_dataset.cell_types
+    batch_indices = np.concatenate(batch_indices)
+elif model_type is 'svaec':
+    if load_model is True:
+        svaec = torch.load('../easycase2.svaec.new_clust.pt')
+        data_loader = DataLoader(gene_dataset, batch_size=128, pin_memory=use_cuda, shuffle=False,
+                                 collate_fn=gene_dataset.collate_fn)
+    elif model_type is 'svaec':
+svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
+              gene_dataset.n_labels)
+infer = JointSemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
+infer.fit(n_epochs=50)
+torch.save(infer.model,'../easycase2.svaec.hierarchy.pt')
+    data_loader = infer.data_loaders['unlabelled']
+    latent, batch_indices, labels = get_latent(svaec, data_loader)
+    keys = gene_dataset.cell_types
+    batch_indices = np.concatenate(batch_indices)
 
-if load_model is True:
-    vae = torch.load('../easycase2.pt')
-else:
-    vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches, n_labels=gene_dataset.n_labels,
-              n_hidden=128, n_latent=10, n_layers=1, dispersion='gene')
-    infer_vae = VariationalInference(vae, gene_dataset, use_cuda=use_cuda)
-    infer_vae.fit(n_epochs=250)
 
-data_loader = DataLoader(gene_dataset, batch_size=128, pin_memory=use_cuda, shuffle=False,
-                         collate_fn=gene_dataset.collate_fn)
-latent, batch_indices, labels = get_latent(vae, data_loader)
-keys = gene_dataset.cell_types
-batch_indices = np.concatenate(batch_indices)
-
-# def EvaluateHarmonization(pop1,pop2,plotcells):
 n_plotcells = 6000
 pop1 = 0
 pop2 = 1
@@ -56,25 +73,32 @@ sample_2batch = sample[(batch_indices[sample] == pop1) + (batch_indices[sample] 
 batch_entropy = entropy_batch_mixing(latent[sample_2batch, :], batch_indices[sample_2batch])
 print("Entropy batch mixing :", batch_entropy)
 
-latent_s = latent[sample, :]
-batch_s = batch_indices[sample]
-label_s = labels[sample]
-if latent_s.shape[1] != 2:
-    latent_s = TSNE().fit_transform(latent_s)
-
-plt.figure(figsize=(10, 10))
-plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
-plt.axis("off")
-plt.tight_layout()
-plt.savefig('../' + plotname + '.batch.png')
-
-
 sample = sample_by_batch(labels, 100)
 latent_s = latent[sample, :]
 batch_s = batch_indices[sample]
 label_s = labels[sample]
 if latent_s.shape[1] != 2:
     latent_s = TSNE().fit_transform(latent_s)
+
+compute_accuracy(svaec, data_loader, classifier=svaec.classifier)
+
+#
+# res1 = knn_purity_avg(
+#     latent[sample, :], labels[sample].astype('int'),
+#     new_cell_types, acc=False
+# )
+# res2 = knn_purity_avg(
+#     latent[sample, :], labels[sample].astype('int'),
+#     new_cell_types, acc=True
+# )
+# print('average KNN purity')
+# for x in res1:
+#     print(x)
+#
+# print('average classification accuracy')
+# for x in res2:
+#     print(x)
+
 
 colors = [sns.color_palette("Greens")[2:6], #Pvalb
 sns.light_palette("green",5)[0:3] , #Pvalb Ex
@@ -100,8 +124,6 @@ for x in colors:
     temp = temp + x
 
 colors = temp
-
-
 key_color_order = ['Pvalb low', 'Pvalb', 'Pvalb 1', 'Pvalb 2',
                    'Pvalb Ex_1','Pvalb Ex_2','Pvalb Ex',
                    'Pvalb Astro_1','Pvalb Astro_2',
@@ -122,28 +144,7 @@ key_color_order = ['Pvalb low', 'Pvalb', 'Pvalb 1', 'Pvalb 2',
                     'Oligo Enpp6_1','Oligo Enpp6_2','Oligo Opalin',
                     'Sncg Ptprk',
                     'Endo Slc38a5','Endo Slc38a5_Peri_2','Endo Slc38a5_Peri_1']
-
-label_dict = dict(zip(keys,np.arange(len(keys))))
-ordered_label = [label_dict[x] for x in key_color_order ]
-
-
-fig, ax = plt.subplots(figsize=(20, 20))
-for i, k in enumerate(ordered_label):
-    ax.scatter(latent_s[label_s == k, 0], latent_s[label_s == k, 1], c=colors[i], label=keys[k], edgecolors='none')
-
-ax.legend()
-fig.tight_layout()
-fig.savefig('../' + plotname + '.label.png', dpi=fig.dpi)
-
-
-sample_2batch = np.random.permutation(sample_2batch)[:1000]
-
-label_map1 = np.genfromtxt('../AIBS/' + '10X_nuclei_Macosko/cluster.annotation.csv', dtype='str', delimiter=',')
-label_map2 = np.genfromtxt('../AIBS/' + '10X_nuclei_Regev/cluster.annotation.csv', dtype='str', delimiter=',')
-label_map1 = dict(zip([x.split('"')[1] for x in label_map[:, 0]], [x.split('"')[1] for x in label_map1[:, 1]]))
-label_map2 = dict(zip([x.split('"')[1] for x in label_map[:, 0]], [x.split('"')[1] for x in label_map2[:, 1]]))
-
-clust_large = np.concatenate([np.repeat(0,3), #Pvalb
+clust_large = np.concatenate([np.repeat(0,4), #Pvalb
                               np.repeat(1,3), #Pvalb Ex
                               np.repeat(2,2), #Pvalb Astrol
                               np.repeat(3,6), #L2/3
@@ -151,21 +152,73 @@ clust_large = np.concatenate([np.repeat(0,3), #Pvalb
                               np.repeat(5,3), #L5 PT
                               np.repeat(6,7), # L5 IT Tcap_1_3
                               np.repeat(7,3), #L5 IT Aldh1a7_2
-                              np.repeat(8,5), #L6 IT
-                              np.repeat(9,1),
-                              np.repeat(10,1),
-                              np.repeat(11,1),
-                              np.repeat(12,1),
-                              np.repeat(13,1)
+                              np.repeat(8,2), #L5 NP
+                              np.repeat(9,5), #L6 IT
+                              np.repeat(10,4), #L6 CT
+                              np.repeat(11,2), #L6b
+                              np.repeat(12,3), #Lamp5
+                              np.repeat(13,3), #VIP
+                              np.repeat(14,2), #Astro
+                              np.repeat(15,1), #OPC
+                              np.repeat(16,1), #VLMC
+                              np.repeat(17,3), #oligo
+                              np.repeat(18,1), # sncg
+                              np.repeat(19,3) #Endo
 ])
+clust_large_label =  np.concatenate([np.repeat('Pvalb',4), #Pvalb
+                              np.repeat('Pvalb Ex',3), #Pvalb Ex
+                              np.repeat('Pvalb Astrol',2), #Pvalb Astrol
+                              np.repeat('L2/3',6), #L2/3
+                              np.repeat('Sst',5), #Sst
+                              np.repeat('L5 PT',3), #L5 PT
+                              np.repeat('L5 IT Tcap',7), # L5 IT Tcap_1_3
+                              np.repeat('L5 IT Aldh1a7',3), #L5 IT Aldh1a7_2
+                              np.repeat('L5 NP',2), #L5 NP
+                              np.repeat('L6 IT',5), #L6 IT
+                              np.repeat('L6 CT',4), #L6 CT
+                              np.repeat('L6b',2), #L6b
+                              np.repeat('Lamp5',3), #Lamp5
+                              np.repeat('VIP',3), #VIP
+                              np.repeat('Astro',2), #Astro
+                              np.repeat('OPC',1), #OPC
+                              np.repeat('VLMC',1), #VLMC
+                              np.repeat('Oligo',3), #oligo
+                              np.repeat('Sncg',1), # sncg
+                              np.repeat('Endo',3) #Endo
+])
+
+#
+label_dict = dict(zip(keys,np.arange(len(keys))))
+ordered_label = [label_dict[x] for x in key_color_order ]
+label_dict = dict(zip(ordered_label,clust_large))
+new_labels = np.asarray([label_dict[x] for x in labels])
+new_cell_types = np.asarray(['Pvalb','Pvalb Ex','Pvalb Astrol','L2/3','Sst','L5PT','L5 IT Tcap','L5 IT Aldh1a7','L5 NP',
+                             'L6 IT','L6 CT','L6b','Lamp5','VIP','Astro','OPC','VLMC','Oligo','Sncg','Endo'])
+
+fig, ax = plt.subplots(figsize=(20, 20))
+for i, k in enumerate(ordered_label):
+    ax.scatter(latent_s[label_s == k, 0], latent_s[label_s == k, 1], c=colors[i], label=keys[k], edgecolors='none')
+
+ax.legend()
+fig.tight_layout()
+fig.savefig('../' + plotname + '.' + model_type + '.label.png', dpi=fig.dpi)
+
+plt.figure(figsize=(10, 10))
+plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
+plt.axis("off")
+plt.tight_layout()
+plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
+
+sample = sample_by_batch(new_labels, 50)
 res1 = knn_purity_avg(
-    latent[sample_2batch, :], labels[sample_2batch].astype('int'),
-    gene_dataset.cell_types, acc=False
+    latent[sample, :], new_labels[sample].astype('int'),
+    new_cell_types, acc=False
 )
 res2 = knn_purity_avg(
-    latent[sample_2batch, :], labels[sample_2batch].astype('int'),
-    gene_dataset.cell_types, acc=True
+    latent[sample, :], new_labels[sample].astype('int'),
+    new_cell_types, acc=True
 )
+np.mean([x[1] for x in res2])
 print('average KNN purity')
 for x in res1:
     print(x)
@@ -173,5 +226,3 @@ for x in res1:
 print('average classification accuracy')
 for x in res2:
     print(x)
-
-

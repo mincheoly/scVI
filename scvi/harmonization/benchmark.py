@@ -1,11 +1,40 @@
 import numpy as np
 from scvi.dataset import GeneExpressionDataset
 from scvi.utils import *
-
-from scvi.utils import to_cuda, no_grad, eval_modules
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing
+from scvi.utils import to_cuda
 
 from scipy import sparse
 from copy import deepcopy
+
+
+def sample_by_batch(batch_indices, nsamples):
+    nbatches = len(np.unique(batch_indices))
+    if isinstance(nsamples,int):
+        nsamples = np.repeat(nsamples,nbatches)
+    sample = []
+    for i in range(nbatches):
+        idx = np.arange(len(batch_indices))[batch_indices == i]
+        s = np.random.permutation(idx)[:min(len(idx), nsamples[i])]
+        sample.append(s)
+    sample = np.concatenate(sample)
+    return (sample)
+
+
+def harmonization_stat(model, data_loader,keys, pop1, pop2):
+    latent, batch_indices, labels = get_latent(model, data_loader)
+    batch_indices = np.concatenate(batch_indices)
+    sample = sample_by_batch(batch_indices, 2000)
+    sample_2batch = sample[(batch_indices[sample] == pop1) + (batch_indices[sample] == pop2)]
+    batch_entropy = entropy_batch_mixing(latent[sample_2batch, :], batch_indices[sample_2batch])
+    print("Entropy batch mixing : %f.3" % batch_entropy)
+    sample = sample_by_batch(labels, 200)
+    res = knn_purity_avg(
+        latent[sample,:], labels.astype('int')[sample],
+        keys, acc=True
+    )
+    print("Average knn purity : %f.3" % np.mean([x[1] for x in res]))
+    return(batch_entropy,res)
 
 
 @no_grad()
@@ -38,17 +67,6 @@ def assign_label(cellid, geneid, labels_map, count, cell_type, seurat):
     dataset = GeneExpressionDataset(*GeneExpressionDataset.get_attributes_from_matrix(new_count, labels=labels_new),
                                     gene_names=geneid, cell_types=cell_type)
     return dataset
-
-
-def sample_by_batch(batch_indices, nsamples):
-    sample = []
-    for i in range(len(np.unique(batch_indices))):
-        idx = np.arange(len(batch_indices))[batch_indices == i]
-        s = np.random.permutation(idx)[:min(len(idx), nsamples)]
-        sample.append(s)
-    sample = np.concatenate(sample)
-    return (sample)
-
 
 def knn_purity(latent, label, batch_indices, pop1, pop2, keys, n_sample=1000,acc=False):
     sample = np.random.permutation(len(label))[range(n_sample)]
@@ -117,7 +135,7 @@ def knn_purity_avg(latent, label, keys, n_sample=1000,acc=False):
                 score.append(0)
     score = np.asarray(score)
     res = [np.mean(np.asarray(score)[label == i]) for i in np.unique(label)]
-    res = [[keys[i], res[i]] for i in range(len(res))]
+    res = [[keys[i], res[i], np.sum(label==i)] for i in np.unique(label)]
     return res
 
 
