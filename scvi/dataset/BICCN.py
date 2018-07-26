@@ -4,7 +4,7 @@ from scvi.dataset.dataset import GeneExpressionDataset
 from sklearn.datasets import dump_svmlight_file, load_svmlight_file
 import os.path
 
-def combine_MacoskoRegev(ngenes=5000, collapse_labels=True):
+def combine_MacoskoRegev(ngenes=5000, collapse_labels=False):
     dataset1 = MacoskoDataset()
     dataset2 = RegevDataset()
     gene_dataset = GeneExpressionDataset.concat_datasets(dataset1, dataset2)
@@ -56,15 +56,19 @@ def combine_MacoskoRegev(ngenes=5000, collapse_labels=True):
                                   ])
     label_dict = dict(zip(keys, np.arange(len(keys))))
     ordered_label = [label_dict[x] for x in key_color_order]
-    label_dict = dict(zip(ordered_label, clust_large))
-    new_labels = np.asarray([label_dict[x] for x in labels])
-    new_cell_types = np.asarray(
-        ['Pvalb', 'Pvalb Ex', 'Pvalb Astrol', 'L2/3', 'Sst', 'L5PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 NP',
-         'L6 IT', 'L6 CT', 'L6b', 'Lamp5', 'VIP', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo'])
     if collapse_labels is True:
-        gene_dataset.labels = new_labels
-        gene_dataset.cell_types = new_cell_types
-    return(gene_dataset,new_labels,new_cell_types)
+        label_dict = dict(zip(ordered_label, clust_large))
+        new_labels = np.asarray([label_dict[x] for x in labels])
+        new_cell_types = np.asarray(
+            ['Pvalb', 'Pvalb Ex', 'Pvalb Astrol', 'L2/3', 'Sst', 'L5PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 NP',
+             'L6 IT', 'L6 CT', 'L6b', 'Lamp5', 'VIP', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo'])
+    else:
+        label_dict = dict(zip(ordered_label,np.arange(len(ordered_label))))
+        new_labels = np.asarray([label_dict[x] for x in labels])
+        new_cell_types = key_color_order
+    gene_dataset.labels = new_labels
+    gene_dataset.cell_types = new_cell_types
+    return(gene_dataset,clust_large)
 
 class MacoskoDataset(GeneExpressionDataset):
     def __init__(self, save_path='../AIBS/'):

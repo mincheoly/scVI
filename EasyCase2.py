@@ -28,7 +28,7 @@ plotname = 'easycase2'
 # np.save("../Macosko_Regev.batch.npy", np.concatenate(gene_dataset.batch_indices))
 # mmwrite("../Macosko_Regev.count.npy", gene_dataset.X)
 
-gene_dataset,group_labels,group_names = combine_MacoskoRegev()
+gene_dataset,labels_groups = combine_MacoskoRegev()
 
 if model_type is 'vae':
     if load_model is True:
@@ -52,12 +52,12 @@ elif model_type is 'svaec':
                                  collate_fn=gene_dataset.collate_fn)
     elif model_type is 'svaec':
 svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-              gene_dataset.n_labels)
+              gene_dataset.n_labels,use_labels_groups=True,labels_groups = list(labels_groups))
 infer = JointSemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
 infer.fit(n_epochs=50)
-torch.save(infer.model,'../easycase2.svaec.hierarchy.pt')
+    torch.save(infer.model,'../easycase2.svaec.hierarchy.pt')
     data_loader = infer.data_loaders['unlabelled']
-    latent, batch_indices, labels = get_latent(svaec, data_loader)
+    latent, batch_indices, labels = get_latent(infer.model, infer.data_loaders['unlabelled'])
     keys = gene_dataset.cell_types
     batch_indices = np.concatenate(batch_indices)
 

@@ -6,8 +6,9 @@ Welcome to scVI's documentation!
    :caption: Contents:
 
    readme
-   installation
-   usage
+   examples/scVI-data-loading.ipynb
+   examples/scVI-dev.ipynb
+   examples/scVI-semi-supervised.ipynb
    contributing
    authors
    history
@@ -16,9 +17,10 @@ Welcome to scVI's documentation!
    :maxdepth: 1
    :caption: Package Reference
 
-   dataset
-   models
-   train
+   scvi.dataset
+   scvi.inference
+   scvi.metrics
+   scvi.models
 
 Indices and tables
 ==================

@@ -82,7 +82,8 @@ class GeneExpressionDataset(Dataset):
             std_scaler.fit(self.X.astype(np.float64))
             subset_genes = np.argsort(std_scaler.var_)[::-1][:new_n_genes]
         else:
-            print("Downsampling from %i to %i genes" % (n_genes, len(subset_genes)))
+            new_n_genes = len(subset_genes) if subset_genes.dtype is not np.dtype('bool') else subset_genes.sum()
+            print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
         self.X = self.X[:, subset_genes]
         self.update_genes(subset_genes)
 
@@ -156,7 +157,7 @@ class GeneExpressionDataset(Dataset):
         log_counts = np.log(X.sum(axis=1))
         local_mean = (np.mean(log_counts) * np.ones((X.shape[0], 1))).astype(np.float32)
         local_var = (np.var(log_counts) * np.ones((X.shape[0], 1))).astype(np.float32)
-        batch_index = batch_index * np.ones((X.shape[0], 1))
+        batch_index = batch_index * np.ones((X.shape[0], 1)) if type(batch_index) is int else batch_index
         labels = labels.reshape(-1, 1) if labels is not None else np.zeros_like(batch_index)
         return X, local_mean, local_var, batch_index, labels
 
@@ -262,8 +263,8 @@ def arrange_categories(original_categories, mapping_from=None, mapping_to=None):
         mapping_to = range(n_categories)
     if mapping_from is None:
         mapping_from = unique_categories
-    assert n_categories == len(mapping_from)
-    assert n_categories == len(mapping_to)
+    assert n_categories <= len(mapping_from)  # one cell_type can have no instance in dataset
+    assert len(mapping_to) == len(mapping_from)
 
     new_categories = np.copy(original_categories)
     for idx_from, idx_to in zip(mapping_from, mapping_to):
