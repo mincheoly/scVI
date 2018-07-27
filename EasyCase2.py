@@ -8,12 +8,15 @@ from torch.utils.data import DataLoader
 import numpy as np
 from scvi.metrics.clustering import get_latent
 from scvi.metrics.classification import compute_accuracy
-from scvi.harmonization.benchmark import sample_by_batch, knn_purity_avg
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import seaborn as sns
+
+from scvi.dataset.BICCN import *
+from scvi.harmonization.Seurat import SEURAT
+from scvi.harmonization.benchmark import sample_by_batch, knn_purity_avg
 from scvi.metrics.clustering import entropy_batch_mixing
-from scvi.dataset.BICCN import combine_MacoskoRegev
+
 # import sys
 # load_model = bool(sys.argv[1])
 # model_type = str(sys.argv[2])
@@ -28,6 +31,25 @@ plotname = 'easycase2'
 # np.save("../Macosko_Regev.batch.npy", np.concatenate(gene_dataset.batch_indices))
 # mmwrite("../Macosko_Regev.count.npy", gene_dataset.X)
 
+
+
+
+dataset1 = MacoskoDataset()
+dataset2 = RegevDataset()
+
+SEURAT = SEURAT()
+seurat1 = SEURAT.create_seurat(dataset1,0)
+seurat2 = SEURAT.create_seurat(dataset2,1)
+ro.r.assign("seurat1", seurat1)
+ro.r.assign("seurat2", seurat2)
+combined = ro.r('hvg_CCA(seurat1,seurat2)')
+
+combined = SEURAT.combine_seurat(dataset1,dataset2)
+latent, batch_indices, labels, cell_types = SEURAT.get_cca(combined)
+batch_entropy = entropy_batch_mixing(latent, batch_indices)
+res = knn_purity_avg(latent, labels.astype('int'), cell_types, acc=True)
+
+
 gene_dataset,labels_groups = combine_MacoskoRegev()
 
 if model_type is 'vae':
@@ -39,7 +61,7 @@ if model_type is 'vae':
         vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches, n_labels=gene_dataset.n_labels,
                   n_hidden=128, n_latent=10, n_layers=1, dispersion='gene')
         infer_vae = VariationalInference(vae, gene_dataset, use_cuda=use_cuda)
-        infer_vae.fit(n_epochs=250)
+        infer_vae.train(n_epochs=250)
         torch.save(infer_vae.model, '../easycase2.pt')
         data_loader = infer_vae.data_loaders['sequential']
     latent, batch_indices, labels = get_latent(vae, data_loader)
@@ -51,15 +73,18 @@ elif model_type is 'svaec':
         data_loader = DataLoader(gene_dataset, batch_size=128, pin_memory=use_cuda, shuffle=False,
                                  collate_fn=gene_dataset.collate_fn)
     elif model_type is 'svaec':
-svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-              gene_dataset.n_labels,use_labels_groups=True,labels_groups = list(labels_groups))
-infer = JointSemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
-infer.fit(n_epochs=50)
-    torch.save(infer.model,'../easycase2.svaec.hierarchy.pt')
-    data_loader = infer.data_loaders['unlabelled']
-    latent, batch_indices, labels = get_latent(infer.model, infer.data_loaders['unlabelled'])
-    keys = gene_dataset.cell_types
-    batch_indices = np.concatenate(batch_indices)
+        svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
+                      gene_dataset.n_labels,use_labels_groups=True,labels_groups = list(labels_groups))
+        # svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
+        #               gene_dataset.n_labels,use_labels_groups=False)
+        infer = JointSemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
+        infer.train(n_epochs=50)
+        infer.accuracy('unlabelled')
+        torch.save(infer.model,'../easycase2.svaec.hierarchy.pt')
+        data_loader = infer.data_loaders['unlabelled']
+        latent, batch_indices, labels = get_latent(infer.model, infer.data_loaders['unlabelled'])
+        keys = gene_dataset.cell_types
+        batch_indices = np.concatenate(batch_indices)
 
 
 n_plotcells = 6000
@@ -72,6 +97,7 @@ sample = sample_by_batch(batch_indices, int(n_plotcells / nbatches))
 sample_2batch = sample[(batch_indices[sample] == pop1) + (batch_indices[sample] == pop2)]
 batch_entropy = entropy_batch_mixing(latent[sample_2batch, :], batch_indices[sample_2batch])
 print("Entropy batch mixing :", batch_entropy)
+compute_accuracy(svaec, data_loader, classifier=svaec.classifier)
 
 sample = sample_by_batch(labels, 100)
 latent_s = latent[sample, :]
@@ -80,7 +106,6 @@ label_s = labels[sample]
 if latent_s.shape[1] != 2:
     latent_s = TSNE().fit_transform(latent_s)
 
-compute_accuracy(svaec, data_loader, classifier=svaec.classifier)
 
 #
 # res1 = knn_purity_avg(
