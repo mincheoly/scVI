@@ -6,16 +6,17 @@
 
 import numpy as np
 
-from scvi.benchmark import all_benchmarks, benchmark
+from scvi.benchmark import all_benchmarks, benchmark, benchamrk_fish_scrna
 from scvi.dataset import BrainLargeDataset, CortexDataset, RetinaDataset, BrainSmallDataset, HematoDataset, \
     LoomDataset, AnnDataset, CsvDataset, CiteSeqDataset, CbmcDataset, PbmcDataset, SyntheticDataset, \
     SeqfishDataset, SmfishDataset, BreastCancerDataset, MouseOBDataset, \
-    GeneExpressionDataset
+    GeneExpressionDataset, PurifiedPBMCDataset
 from scvi.inference import JointSemiSupervisedVariationalInference, AlternateSemiSupervisedVariationalInference, \
-    ClassifierInference, VariationalInference
+    ClassifierInference, VariationalInference, adversarial_wrapper, mmd_wrapper
 from scvi.metrics.adapt_encoder import adapt_encoder
 from scvi.models import VAE, SVAEC, VAEC
 from scvi.models.classifier import Classifier
+
 
 use_cuda = True
 
@@ -28,7 +29,8 @@ def test_cortex():
     infer_cortex_vae.ll('train')
     infer_cortex_vae.differential_expression_stats('train')
     infer_cortex_vae.differential_expression('test')
-    infer_cortex_vae.imputation_errors('test', rate=0.5)
+    infer_cortex_vae.imputation('train', corruption='uniform')
+    infer_cortex_vae.imputation('test', n_samples=2, corruption='binomial')
 
     svaec = SVAEC(cortex_dataset.nb_genes, cortex_dataset.n_batches, cortex_dataset.n_labels)
     infer_cortex_svaec = JointSemiSupervisedVariationalInference(svaec, cortex_dataset,
@@ -63,6 +65,8 @@ def test_synthetic_1():
     infer_synthetic_svaec.show_t_sne('unlabelled', n_samples=50, color_by='labels')
     infer_synthetic_svaec.show_t_sne('labelled', n_samples=50, color_by='batches and labels')
     infer_synthetic_svaec.clustering_scores('labelled')
+    infer_synthetic_svaec.clustering_scores('labelled', prediction_algorithm='gmm')
+    infer_synthetic_svaec.unsupervised_accuracy('unlabelled')
 
 
 def test_synthetic_2():
@@ -71,8 +75,17 @@ def test_synthetic_2():
     infer_synthetic_vaec = JointSemiSupervisedVariationalInference(vaec, synthetic_dataset, use_cuda=use_cuda,
                                                                    early_stopping_metric='ll', frequency=1,
                                                                    save_best_state_metric='accuracy', on='labelled')
+    infer_synthetic_vaec = adversarial_wrapper(infer_synthetic_vaec, warm_up=5)
+    infer_synthetic_vaec = mmd_wrapper(infer_synthetic_vaec, warm_up=15)
     infer_synthetic_vaec.train(n_epochs=20)
     infer_synthetic_vaec.svc_rf(unit_test=True)
+
+
+def test_fish_rna():
+    gene_dataset_fish = SmfishDataset()
+    gene_dataset_seq = CortexDataset(genes_fish=gene_dataset_fish.gene_names,
+                                     genes_to_keep=[], additional_genes=50)
+    benchamrk_fish_scrna(gene_dataset_seq, gene_dataset_fish)
 
 
 def base_benchmark(gene_dataset):
@@ -152,7 +165,11 @@ def test_cbmc():
 
 def test_pbmc():
     pbmc_dataset = PbmcDataset(save_path='tests/data/')
+    purified_pbmc_dataset = PurifiedPBMCDataset(save_path='tests/data/')  # all cells
+    purified_t_cells = PurifiedPBMCDataset(save_path='tests/data/', filter_cell_types=range(6))  # only t-cells
     base_benchmark(pbmc_dataset)
+    assert len(purified_t_cells.cell_types) == 6
+    assert len(purified_pbmc_dataset.cell_types) == 10
 
 
 def test_filter_and_concat_datasets():
@@ -199,11 +216,6 @@ def test_mouseob():
     base_benchmark(mouseob_dataset)
 
 
-def test_smfish():
-    smfish_dataset = SmfishDataset(save_path='tests/data/')
-    base_benchmark(smfish_dataset)
-
-
 def test_particular_benchmark():
     synthetic_dataset = SyntheticDataset()
     benchmark(synthetic_dataset, n_epochs=1, use_cuda=False)
@@ -214,6 +226,7 @@ def test_nb_not_zinb():
     svaec = SVAEC(synthetic_dataset.nb_genes,
                   synthetic_dataset.n_batches,
                   synthetic_dataset.n_labels,
+                  labels_groups=[0, 0, 1],
                   reconstruction_loss="nb")
     infer_synthetic_svaec = JointSemiSupervisedVariationalInference(svaec, synthetic_dataset, use_cuda=use_cuda)
     infer_synthetic_svaec.train(n_epochs=1)

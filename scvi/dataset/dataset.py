@@ -27,6 +27,8 @@ class GeneExpressionDataset(Dataset):
         self.X = X
         self.nb_genes = self.X.shape[1]
         self.dense = type(self.X) is np.ndarray
+        if self.dense:
+            self.X = np.ascontiguousarray(self.X, dtype=np.float32)
         self.local_means = local_means
         self.local_vars = local_vars
         self.batch_indices, self.n_batches = arrange_categories(batch_indices)
@@ -52,11 +54,22 @@ class GeneExpressionDataset(Dataset):
 
     def collate_fn(self, batch):
         indexes = np.array(batch)
-        X = torch.FloatTensor(self.X[indexes]) if self.dense else torch.FloatTensor(self.X[indexes].toarray())
-        return X, torch.FloatTensor(self.local_means[indexes]), \
-            torch.FloatTensor(self.local_vars[indexes]), \
-            torch.LongTensor(self.batch_indices[indexes]), \
-            torch.LongTensor(self.labels[indexes])
+        if self.dense:
+            X = torch.from_numpy(self.X[indexes])
+        else:
+            X = torch.FloatTensor(self.X[indexes].toarray())
+        if self.x_coord is None or self.y_coord is None:
+            return X, torch.FloatTensor(self.local_means[indexes]), \
+                   torch.FloatTensor(self.local_vars[indexes]), \
+                   torch.LongTensor(self.batch_indices[indexes]), \
+                   torch.LongTensor(self.labels[indexes])
+        else:
+            return X, torch.FloatTensor(self.local_means[indexes]), \
+                   torch.FloatTensor(self.local_vars[indexes]), \
+                   torch.LongTensor(self.batch_indices[indexes]), \
+                   torch.LongTensor(self.labels[indexes]), \
+                   torch.FloatTensor(self.x_coord[indexes]), \
+                   torch.FloatTensor(self.y_coord[indexes])
 
     def update_genes(self, subset_genes):
         if hasattr(self, 'gene_names'):
@@ -74,7 +87,7 @@ class GeneExpressionDataset(Dataset):
     def subsample_genes(self, new_n_genes=None, subset_genes=None):
         n_cells, n_genes = self.X.shape
         if subset_genes is None and \
-                (not hasattr(self, 'gene_names') or new_n_genes is False or new_n_genes >= n_genes):
+                (new_n_genes is False or new_n_genes >= n_genes):
             return None  # Do nothing if subsample more genes than total number of genes
         if subset_genes is None:
             print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
@@ -153,13 +166,13 @@ class GeneExpressionDataset(Dataset):
                 f.write(data)
 
     @staticmethod
-    def get_attributes_from_matrix(X, batch_index=0, labels=None):
+    def get_attributes_from_matrix(X, batch_indices=0, labels=None):
         log_counts = np.log(X.sum(axis=1))
         local_mean = (np.mean(log_counts) * np.ones((X.shape[0], 1))).astype(np.float32)
         local_var = (np.var(log_counts) * np.ones((X.shape[0], 1))).astype(np.float32)
-        batch_index = batch_index * np.ones((X.shape[0], 1))
-        labels = labels.reshape(-1, 1) if labels is not None else np.zeros_like(batch_index)
-        return X, local_mean, local_var, batch_index, labels
+        batch_indices = batch_indices * np.ones((X.shape[0], 1)) if type(batch_indices) is int else batch_indices
+        labels = labels.reshape(-1, 1) if labels is not None else np.zeros_like(batch_indices)
+        return X, local_mean, local_var, batch_indices, labels
 
     @staticmethod
     def get_attributes_from_list(Xs, list_labels=None):
@@ -174,7 +187,7 @@ class GeneExpressionDataset(Dataset):
         for i, X in enumerate(Xs):
             label = list_labels[i] if list_labels is not None else list_labels
             X, local_mean, local_var, batch_index, label = (
-                GeneExpressionDataset.get_attributes_from_matrix(X, batch_index=i, labels=label)
+                GeneExpressionDataset.get_attributes_from_matrix(X, batch_indices=i, labels=label)
             )
             new_Xs += [X]
             local_means += [local_mean]
@@ -263,8 +276,8 @@ def arrange_categories(original_categories, mapping_from=None, mapping_to=None):
         mapping_to = range(n_categories)
     if mapping_from is None:
         mapping_from = unique_categories
-    assert n_categories == len(mapping_from)
-    assert n_categories == len(mapping_to)
+    assert n_categories <= len(mapping_from)  # one cell_type can have no instance in dataset
+    assert len(mapping_to) == len(mapping_from)
 
     new_categories = np.copy(original_categories)
     for idx_from, idx_to in zip(mapping_from, mapping_to):
