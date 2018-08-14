@@ -22,11 +22,17 @@ class CropseqDataset(GeneExpressionDataset):
 
     """
 
-    def __init__(self, filename, metadata_filename, save_path='data/', url=None, new_n_genes=False, subset_genes=None, use_wells=False, use_labels=False):
-        """
+    def __init__(
+            self, 
+            filename, 
+            metadata_filename, 
+            save_path='data/', 
+            url=None, 
+            new_n_genes=False, 
+            subset_genes=None, 
+            use_wells=False, 
+            use_labels=False):
 
-
-        """
         self.download_name = filename
         self.metadata_filename = metadata_filename
         self.save_path = save_path
