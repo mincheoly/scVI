@@ -18,11 +18,11 @@ class CropseqDataset(GeneExpressionDataset):
 
     Examples:
         >>> # Loading a local dataset
-        >>> local_ann_dataset = CropseqDataset("TM_droplet_mat.h5", save_path = 'data/')
+        >>> local_cropseq_dataset = CropseqDataset("TM_droplet_mat.h5", save_path = 'data/')
 
     """
 
-    def __init__(self, filename, metadata_filename, save_path='data/', url=None, new_n_genes=False, subset_genes=None, use_wells=False):
+    def __init__(self, filename, metadata_filename, save_path='data/', url=None, new_n_genes=False, subset_genes=None, use_wells=False, use_labels=False):
         """
 
 
@@ -32,6 +32,7 @@ class CropseqDataset(GeneExpressionDataset):
         self.save_path = save_path
         self.url = url
         self.use_wells = use_wells
+        self.use_labels = use_labels
 
         data, gene_names, guides, well_numbers = self.download_and_preprocess()
 
@@ -39,8 +40,8 @@ class CropseqDataset(GeneExpressionDataset):
             *GeneExpressionDataset.get_attributes_from_matrix(
                 data, 
                 batch_indices=well_numbers if self.use_wells else 0, 
-                labels=guides),
-            gene_names=gene_names)
+                labels=guides if self.use_labels else None),
+                gene_names=gene_names)
 
         self.subsample_genes(new_n_genes=new_n_genes, subset_genes=subset_genes)
 
@@ -48,9 +49,9 @@ class CropseqDataset(GeneExpressionDataset):
     def preprocess(self):
         print("Preprocessing CROP-seq dataset")
 
-        gene_names, matrix = self.read_h5_file()
+        barcodes, gene_names, matrix = self.read_h5_file()
 
-        is_gene = pd.Series(gene_names, dtype=str).str.contains('guide').values
+        is_gene = ~pd.Series(gene_names, dtype=str).str.contains('guide').values
 
         # Remove guides from the gene list
         gene_names = gene_names[is_gene]
@@ -60,8 +61,17 @@ class CropseqDataset(GeneExpressionDataset):
         metadata = pd.read_csv(self.metadata_filename, sep='\t')
         keep_cell_indices, guides, well_numbers = self.process_metadata(metadata, data, barcodes)
 
+        print('Number of cells kept after filtering with metadata:', len(keep_cell_indices))
+
         # Filter the data matrix
         data = data[keep_cell_indices, :]
+
+        # Remove all 0 cells
+        has_umis = (data.sum(axis=1) > 0).A1
+        data = data[has_umis, :]
+        guides = guides[has_umis]
+        well_numbers = well_numbers[has_umis]
+        print('Number of cells kept after removing all zero cells:', has_umis.sum())
 
         print("Finished preprocessing CROP-seq dataset")
         return data, gene_names, guides, well_numbers
@@ -102,4 +112,4 @@ class CropseqDataset(GeneExpressionDataset):
                     attributes['indptr']), 
                 shape=attributes['shape'])
             
-            return attributes['barcodes'].astype(str), attributes['gene_names'].astype(str), matrix.transpose()
+        return attributes['barcodes'].astype(str), attributes['gene_names'].astype(str), matrix.transpose()
