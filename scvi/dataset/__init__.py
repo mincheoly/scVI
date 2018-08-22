@@ -1,6 +1,5 @@
 from .brain_large import BrainLargeDataset
 from .cortex import CortexDataset
-from .cropseq import CropseqDataset
 from .dataset import GeneExpressionDataset
 from .synthetic import SyntheticDataset
 from .cite_seq import CiteSeqDataset, CbmcDataset
@@ -16,7 +15,6 @@ from .data_loaders import DataLoaders
 
 __all__ = ['SyntheticDataset',
            'CortexDataset',
-           'CropseqDataset'
            'BrainLargeDataset',
            'RetinaDataset',
            'GeneExpressionDataset',
