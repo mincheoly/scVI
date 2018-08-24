@@ -70,7 +70,6 @@ class VAEC(VAE):
         )
 
         if self.log_variational:
-            print(xs.shape)
             xs_ = torch.log(1 + xs)
 
         # Sampling
